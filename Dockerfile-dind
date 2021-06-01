@@ -1,0 +1,142 @@
+
+FROM buildpack-deps:bionic
+
+# make Apt non-interactive
+RUN echo 'APT::Get::Assume-Yes "true";' > /etc/apt/apt.conf.d/90actions \
+  && echo 'DPkg::Options "--force-confnew";' >> /etc/apt/apt.conf.d/90actions
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Debian Jessie is EOL'd and original repos don't work.
+# Switch to the archive mirror until we can get people to
+# switch to Stretch.
+RUN if grep -q Debian /etc/os-release && grep -q jessie /etc/os-release; then \
+	rm /etc/apt/sources.list \
+    && echo "deb http://archive.debian.org/debian/ jessie main" >> /etc/apt/sources.list \
+    && echo "deb http://security.debian.org/debian-security jessie/updates main" >> /etc/apt/sources.list \
+	; fi
+
+# Make sure PATH includes ~/.local/bin
+# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=839155
+# This only works for root. The actions user is done near the end of this Dockerfile
+RUN echo 'PATH="$HOME/.local/bin:$PATH"' >> /etc/profile.d/user-local-path.sh
+
+# man directory is missing in some base images
+# https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=863199
+RUN apt-get update \
+  && mkdir -p /usr/share/man/man1 \
+  && apt-get install -y \
+    git mercurial xvfb apt \
+    locales sudo openssh-client ca-certificates tar gzip parallel \
+    net-tools netcat unzip zip bzip2 gnupg curl wget make jq
+
+
+# Set timezone to UTC by default
+RUN ln -sf /usr/share/zoneinfo/Etc/UTC /etc/localtime
+
+# Use unicode
+RUN locale-gen C.UTF-8 || true
+ENV LANG=C.UTF-8
+
+RUN set -ex \
+  && export DOCKER_VERSION=docker-19.03.12.tgz \
+  && DOCKER_URL="https://download.docker.com/linux/static/stable/x86_64/${DOCKER_VERSION}" \
+  && echo Docker URL: $DOCKER_URL \
+  && curl --silent --show-error --location --fail --retry 3 --output /tmp/docker.tgz "${DOCKER_URL}" \
+  && ls -lha /tmp/docker.tgz \
+  && tar -xz -C /tmp -f /tmp/docker.tgz \
+  && mv /tmp/docker/* /usr/bin \
+  && rm -rf /tmp/docker /tmp/docker.tgz \
+  && which docker \
+  && (docker version || true)
+
+# docker compose
+RUN COMPOSE_URL="https://circle-downloads.s3.amazonaws.com/circleci-images/cache/linux-amd64/docker-compose-latest" \
+  && curl --silent --show-error --location --fail --retry 3 --output /usr/bin/docker-compose $COMPOSE_URL \
+  && chmod +x /usr/bin/docker-compose \
+  && docker-compose version
+
+# install dockerize
+RUN DOCKERIZE_URL="https://circle-downloads.s3.amazonaws.com/circleci-images/cache/linux-amd64/dockerize-latest.tar.gz" \
+  && curl --silent --show-error --location --fail --retry 3 --output /tmp/dockerize-linux-amd64.tar.gz $DOCKERIZE_URL \
+  && tar -C /usr/local/bin -xzvf /tmp/dockerize-linux-amd64.tar.gz \
+  && rm -rf /tmp/dockerize-linux-amd64.tar.gz \
+  && dockerize --version
+
+RUN groupadd --gid 3737 actions \
+  && useradd --uid 3737 --gid actions --shell /bin/bash --create-home actions \
+  && echo 'actions ALL=NOPASSWD: ALL' >> /etc/sudoers.d/50-actions \
+  && echo 'Defaults    env_keep += "DEBIAN_FRONTEND"' >> /etc/sudoers.d/env_keep
+
+ARG GIT_VERSION="2.29.0"
+RUN \
+  curl -sL https://www.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.gz -o git.tgz \
+  && tar zxf git.tgz \
+  && cd git-${GIT_VERSION} \
+  && ./configure --prefix=/usr \
+  && make \
+  && make install
+
+# BEGIN IMAGE CUSTOMIZATIONS
+
+# END IMAGE CUSTOMIZATIONS
+
+USER actions
+ENV PATH /home/actions/.local/bin:/home/actions/bin:${PATH}
+
+CMD ["/bin/sh"]
+
+
+###
+### DIND
+###
+
+# docker installations command expect to run as root
+USER root
+
+#  The package `btrfs-progs` has replaced `btrfs-tools` in newer distros. 
+#  We'll try both for now but after older distros like Ubuntu 16.04 (Xenial), 
+#  and Debian Stretch drop off the tag lists from upstream, we should just 
+#  install `btrfs-progs`.
+RUN apt-get update && apt-get install -y \
+		iptables \
+		xz-utils && \
+	if ! apt-get install -y btrfs-tools; then  apt-get install -y btrfs-progs; fi
+
+# set up subuid/subgid so that "--userns-remap=default" works out-of-the-box
+RUN set -x \
+    && addgroup --system dockremap \
+    && adduser --system --ingroup dockremap dockremap \
+    && echo 'dockremap:165536:65536' >> /etc/subuid \
+    && echo 'dockremap:165536:65536' >> /etc/subgid
+
+ENV DIND_COMMIT 3b5fac462d21ca164b3778647420016315289034
+
+RUN wget -O /usr/local/bin/dind "https://raw.githubusercontent.com/docker/docker/${DIND_COMMIT}/hack/dind" \
+    && chmod +x /usr/local/bin/dind
+
+RUN set -x \
+    && addgroup --system docker \
+    && sudo usermod --append --groups docker actions
+
+# avoid creating separate files and embed file here
+RUN printf '#!/bin/sh \n\
+set -e \n\
+if [ "$#" -eq 0 -o "${1#-}" != "$1" ]; then \n\
+    set -- dockerd --host=unix:///var/run/docker.sock --host=tcp://0.0.0.0:2375 "$@" \n\
+fi \n\
+ \n\
+if [ "$1" = 'dockerd' ]; then \n\
+    set -- sudo sh "$(which dind)" "$@" \n\
+fi \n\
+ \n\
+exec "$@" \n\
+' > /usr/local/bin/dockerd-entrypoint.sh \
+   && chmod +x /usr/local/bin/dockerd-entrypoint.sh
+
+VOLUME /var/lib/docker
+
+ENTRYPOINT ["dockerd-entrypoint.sh"]
+
+USER actions
+
