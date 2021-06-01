@@ -3,9 +3,6 @@ FROM retzero/actions-buildpack-dind
 
 LABEL maintainer="Hyokeun Jeon <hyokeun@gmail.com>"
 
-ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
-RUN mkdir -p /opt/hostedtoolcache
-
 ENV GH_RUNNER_VERSION="2.273.5"
 ENV TARGETPLATFORM="linux/amd64"
 
