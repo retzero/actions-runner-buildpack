@@ -3,15 +3,6 @@ FROM retzero/actions-buildpack-dind
 
 LABEL maintainer="Hyokeun Jeon <hyokeun@gmail.com>"
 
-USER root
-
-RUN \
-  apt-get update \
-  && sudo apt install -y acl \
-  && sudo setfacl -m user:actions:rw /var/run/docker.sock
-
-USER actions
-
 ENV AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
 RUN mkdir -p /opt/hostedtoolcache
 
