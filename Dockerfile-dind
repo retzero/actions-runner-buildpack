@@ -139,6 +139,10 @@ exec "$@" \n\
 ' > /usr/local/bin/dockerd-entrypoint.sh \
    && chmod +x /usr/local/bin/dockerd-entrypoint.sh
 
+# configure docker
+RUN apt-get update \
+  && sudo apt install -y acl
+
 VOLUME /var/lib/docker
 
 ENTRYPOINT ["dockerd-entrypoint.sh"]
