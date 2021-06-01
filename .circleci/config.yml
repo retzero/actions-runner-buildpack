@@ -11,13 +11,13 @@ jobs:
      - run:
          name: Build docker image
          command: |
-           docker build -t actions-buildpack-dind:latest -f Dockerfile-dind .
+           docker build -t ${CIRCLE_USERNAME}/actions-buildpack-dind -f Dockerfile-dind .
 
      - run:
          name: Push to docker hub
          command: |
            docker login -u ${DOCKER_LOGIN_ID} -p ${DOCKER_LOGIN_PASSWORD}
-           docker push ${CIRCLE_USERNAME}/actions-buildpack-dind:latest
+           docker push ${CIRCLE_USERNAME}/actions-buildpack-dind
 
 workflows:
   version: 2
