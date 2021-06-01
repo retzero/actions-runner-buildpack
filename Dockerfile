@@ -17,7 +17,9 @@ RUN sudo chown -R actions:actions /actions-runner \
   && rm /actions-runner/install_actions.sh
 
 COPY token.sh entrypoint.sh /
-RUN chmod +x /token.sh /entrypoint.sh
+RUN sudo chmod +x /token.sh /entrypoint.sh \
+  && sudo chown actions:actions /token.sh \
+  && sudo chown actions:actions /entrypoint.sh 
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/actions-runner/bin/runsvc.sh"]
