@@ -73,6 +73,11 @@ RUN groupadd --gid 3737 actions \
   && echo 'actions ALL=NOPASSWD: ALL' >> /etc/sudoers.d/50-actions \
   && echo 'Defaults    env_keep += "DEBIAN_FRONTEND"' >> /etc/sudoers.d/env_keep
 
+# configure docker
+RUN apt-get update \
+  && sudo apt install -y acl \
+  && sudo setfacl -m user:actions:rw /var/run/docker.sock
+
 ARG GIT_VERSION="2.29.0"
 RUN \
   curl -sL https://www.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.gz -o git.tgz \
